@@ -104,6 +104,7 @@ public class ServeurChat extends Serveur {
             if (!cnx.getAlias().equals(aliasExpediteur)){
 
                 cnx.envoyer(aliasExpediteur + " >>" + str);
+                System.out.println(" test ");
             }
 
         }
@@ -112,6 +113,7 @@ public class ServeurChat extends Serveur {
 
 
     public Vector<String> historique = new Vector<>();
+
 
 
 }
