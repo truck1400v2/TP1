@@ -105,6 +105,7 @@ public class ServeurChat extends Serveur {
 
                 cnx.envoyer(aliasExpediteur + " >>" + str);
                 System.out.println(" testtt ");
+                System.out.println("test100");
             }
 
         }
