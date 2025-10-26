@@ -22,6 +22,8 @@ public class ServeurChat extends Serveur {
         super(port);
     }
 
+    /* --------------------------- TEMPORAIRE --------------------------------
+
     @Override
     public synchronized boolean ajouter(Connexion connexion) {
         String hist = this.historique();
@@ -33,6 +35,20 @@ public class ServeurChat extends Serveur {
         }
         return super.ajouter(connexion);
     }
+
+    --------------------------- À VALIDER --------------------------------
+    */
+
+    @Override
+    public synchronized boolean ajouter(Connexion connexion) {
+        String hist = this.historique();
+        if (!hist.isEmpty()) {
+            connexion.envoyer("HIST " + hist);
+        }
+        return super.ajouter(connexion);
+    }
+
+
     /**
      * Valide l'arriv�e d'un nouveau client sur le serveur. Cette red�finition
      * de la m�thode h�rit�e de Serveur v�rifie si le nouveau client a envoy�
@@ -94,11 +110,14 @@ public class ServeurChat extends Serveur {
      * forme message1\nmessage2\nmessage3 ...
      */
     public String historique() {
-        String s = "";
-        return s;
+        //String s = "";
+        //return s;
+        return historiquePayload();
     }
 
     public void envoyerATousSauf(String str, String aliasExpediteur){
+
+        ajouterHistorique(aliasExpediteur, str);
 
         for (Connexion cnx:connectes){
             if (!cnx.getAlias().equals(aliasExpediteur)){
@@ -111,7 +130,29 @@ public class ServeurChat extends Serveur {
     }
 
 
-    public Vector<String> historique = new Vector<>();
+    // Historique des messages publics ("alias>>message")
+    public final Vector<String> historique = new Vector<>();
+
+    /** Ajoute une ligne au format "alias>>message" */
+    public void ajouterHistorique(String alias, String message) {
+        if (alias == null) alias = "";
+        if (message == null) message = "";
+        // éviter les retours à la ligne qui casseraient le split("\n") côté client
+        message = message.replace('\n', ' ');
+        historique.add(alias + ">>" + message);
+    }
+
+    /** Concatène l'historique en une seule chaîne, lignes séparées par '\n' */
+    public  String historiquePayload() {
+        if (historique.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < historique.size(); i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(historique.get(i));
+        }
+        return sb.toString();
+    }
+
 
 
 

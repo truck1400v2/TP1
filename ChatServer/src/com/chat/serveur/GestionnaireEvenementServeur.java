@@ -54,6 +54,18 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     msg = (evenement.getArgument());
                     serveur.envoyerATousSauf(msg,aliasExpediteur);
                     break;
+                case "HIST": {
+                    // Renvoyer l'historique au client qui le demande
+                    String hist = serveur.historique();         // "ligne1\nligne2\n..."
+                    if (!hist.isEmpty()) {
+                        cnx.envoyer("HIST " + hist);
+                    } else {
+                        // L’énoncé dit : s’il n’y a pas de messages, renvoyer OK
+                        cnx.envoyer("OK");
+                    }
+                    break; // IMPORTANT : ne pas tomber dans default
+                }
+
 
                 //Ajoutez ici d�autres case pour g�rer d�autres commandes.
 
