@@ -4,40 +4,13 @@ import java.util.Vector;
 import com.commun.net.Connexion;
 
 /**
- * Cette classe �tend (h�rite) la classe abstraite Serveur et y ajoute le n�cessaire pour que le
- * serveur soit un serveur de chat.
- *
- * @author Abdelmoum�ne Toudeft (Abdelmoumene.Toudeft@etsmtl.ca)
- * @version 1.0
- * @since 2023-09-15
+ * Serveur de chat (public + privé).
  */
 public class ServeurChat extends Serveur {
 
-    /**
-     * Cr�e un serveur de chat qui va �couter sur le port sp�cifi�.
-     *
-     * @param port int Port d'�coute du serveur
-     */
     public ServeurChat(int port) {
         super(port);
     }
-
-    /* --------------------------- TEMPORAIRE --------------------------------
-
-    @Override
-    public synchronized boolean ajouter(Connexion connexion) {
-        String hist = this.historique();
-        if ("".equals(hist)) {
-            connexion.envoyer("OK");
-        }
-        else {
-            connexion.envoyer("HIST " + hist);
-        }
-        return super.ajouter(connexion);
-    }
-
-    --------------------------- À VALIDER --------------------------------
-    */
 
     @Override
     public synchronized boolean ajouter(Connexion connexion) {
@@ -48,18 +21,8 @@ public class ServeurChat extends Serveur {
         return super.ajouter(connexion);
     }
 
-
-    /**
-     * Valide l'arriv�e d'un nouveau client sur le serveur. Cette red�finition
-     * de la m�thode h�rit�e de Serveur v�rifie si le nouveau client a envoy�
-     * un alias compos� uniquement des caract�res a-z, A-Z, 0-9, - et _.
-     *
-     * @param connexion Connexion la connexion repr�sentant le client
-     * @return boolean true, si le client a valid� correctement son arriv�e, false, sinon
-     */
     @Override
     protected boolean validerConnexion(Connexion connexion) {
-
         String aliasFourni = connexion.getAvailableText().trim();
         char c;
         int taille;
@@ -79,7 +42,7 @@ public class ServeurChat extends Serveur {
         if (!res)
             return false;
         for (Connexion cnx:connectes) {
-            if (aliasFourni.equalsIgnoreCase(cnx.getAlias())) { //alias d�j� utilis�
+            if (aliasFourni.equalsIgnoreCase(cnx.getAlias())) { // alias déjà utilisé
                 res = false;
                 break;
             }
@@ -90,60 +53,42 @@ public class ServeurChat extends Serveur {
         return true;
     }
 
-    /**
-     * Retourne la liste des alias des connect�s au serveur dans une cha�ne de caract�res.
-     *
-     * @return String cha�ne de caract�res contenant la liste des alias des membres connect�s sous la
-     * forme alias1:alias2:alias3 ...
-     */
+    /** Liste des connectés au format alias1:alias2:...: */
     public String list() {
         String s = "";
         for (Connexion cnx:connectes)
             s+=cnx.getAlias()+":";
         return s;
     }
-    /**
-     * Retourne la liste des messages de l'historique de chat dans une cha�ne
-     * de caract�res.
-     *
-     * @return String cha�ne de caract�res contenant la liste des alias des membres connect�s sous la
-     * forme message1\nmessage2\nmessage3 ...
-     */
+
+    /** Historique (message1\nmessage2\n...) */
     public String historique() {
-        //String s = "";
-        //return s;
         return historiquePayload();
     }
 
+    /** Envoie à tous sauf l’expéditeur + ajoute à l’historique */
     public void envoyerATousSauf(String str, String aliasExpediteur){
-
         ajouterHistorique(aliasExpediteur, str);
-
         for (Connexion cnx:connectes){
             if (!cnx.getAlias().equals(aliasExpediteur)){
-
                 cnx.envoyer(aliasExpediteur + " >>" + str);
             }
-
         }
-
     }
 
-
-    // Historique des messages publics ("alias>>message")
+    // -------------------- Historique public --------------------
     public final Vector<String> historique = new Vector<>();
 
-    /** Ajoute une ligne au format "alias>>message" */
+    /** Ajoute "alias>>message" (sans \n) */
     public void ajouterHistorique(String alias, String message) {
         if (alias == null) alias = "";
         if (message == null) message = "";
-        // éviter les retours à la ligne qui casseraient le split("\n") côté client
         message = message.replace('\n', ' ');
         historique.add(alias + ">>" + message);
     }
 
-    /** Concatène l'historique en une seule chaîne, lignes séparées par '\n' */
-    public  String historiquePayload() {
+    /** Concatène l’historique avec '\n' */
+    public String historiquePayload() {
         if (historique.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < historique.size(); i++) {
@@ -153,7 +98,79 @@ public class ServeurChat extends Serveur {
         return sb.toString();
     }
 
+    // -------------------- Invitations & Salons --------------------
+    private final Vector<Invitation> invitations = new Vector<>();
+    private final Vector<SalonPrive> salons = new Vector<>();
 
+    /** Trouve une connexion par alias (ignore la casse) */
+    public Connexion trouverParAlias(String alias) {
+        if (alias == null) return null;
+        for (Connexion c : connectes) {
+            if (c.getAlias().equalsIgnoreCase(alias)) return c;
+        }
+        return null;
+    }
 
+    /** Alias "canonique" (casse exacte enregistrée côté serveur) */
+    private String canon(String alias) {
+        if (alias == null) return "";
+        String a = alias.trim();
+        for (Connexion c : connectes) {
+            if (c.getAlias().equalsIgnoreCase(a)) {
+                return c.getAlias();
+            }
+        }
+        return a;
+    }
 
+    // ----- Invitations (ordre sensible: hôte -> invité), comparaison ignoreCase -----
+    public synchronized boolean existeInvitation(String hote, String invite) {
+        String h = canon(hote), i = canon(invite);
+        for (Invitation inv : invitations) {
+            if (inv.getHote() != null && inv.getInvite() != null
+                    && inv.getHote().equalsIgnoreCase(h)
+                    && inv.getInvite().equalsIgnoreCase(i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public synchronized void ajouterInvitation(String hote, String invite) {
+        String h = canon(hote), i = canon(invite);
+        if (!existeInvitation(h, i)) {
+            invitations.add(new Invitation(h, i)); // on stocke canonique
+        }
+    }
+
+    public synchronized void supprimerInvitation(String hote, String invite) {
+        String h = canon(hote), i = canon(invite);
+        for (int idx = 0; idx < invitations.size(); idx++) {
+            Invitation inv = invitations.get(idx);
+            if (inv.getHote() != null && inv.getInvite() != null
+                    && inv.getHote().equalsIgnoreCase(h)
+                    && inv.getInvite().equalsIgnoreCase(i)) {
+                invitations.remove(idx);
+                break;
+            }
+        }
+    }
+
+    // ----- Salons (ordre insensible: A-B == B-A) -----
+    public synchronized boolean existeSalon(String a, String b) {
+        return salons.contains(new SalonPrive(a, b));
+    }
+
+    public synchronized boolean ajouterSalon(String a, String b) {
+        SalonPrive sp = new SalonPrive(a, b);
+        if (!salons.contains(sp)) {
+            salons.add(sp);
+            return true;
+        }
+        return false;
+    }
+
+    public synchronized boolean supprimerSalon(String a, String b) {
+        return salons.remove(new SalonPrive(a, b));
+    }
 }

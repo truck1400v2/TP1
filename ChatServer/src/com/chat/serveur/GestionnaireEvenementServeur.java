@@ -5,30 +5,17 @@ import com.commun.evenement.GestionnaireEvenement;
 import com.commun.net.Connexion;
 
 /**
- * Cette classe repr�sente un gestionnaire d'�v�nement d'un serveur. Lorsqu'un serveur re�oit un texte d'un client,
- * il cr�e un �v�nement � partir du texte re�u et alerte ce gestionnaire qui r�agit en g�rant l'�v�nement.
- *
- * @author Abdelmoum�ne Toudeft (Abdelmoumene.Toudeft@etsmtl.ca)
- * @version 1.0
- * @since 2023-09-01
+ * Cette classe représente un gestionnaire d'événement d'un serveur.
+ * Lorsqu'un serveur reçoit un texte d'un client, il crée un événement à partir du texte reçu
+ * et alerte ce gestionnaire qui réagit en gérant l'événement.
  */
 public class GestionnaireEvenementServeur implements GestionnaireEvenement {
     private Serveur serveur;
 
-    /**
-     * Construit un gestionnaire d'�v�nements pour un serveur.
-     *
-     * @param serveur Serveur Le serveur pour lequel ce gestionnaire g�re des �v�nements
-     */
     public GestionnaireEvenementServeur(Serveur serveur) {
         this.serveur = serveur;
     }
 
-    /**
-     * M�thode de gestion d'�v�nements. Cette m�thode contiendra le code qui g�re les r�ponses obtenues d'un client.
-     *
-     * @param evenement L'�v�nement � g�rer.
-     */
     @Override
     public void traiter(Evenement evenement) {
         Object source = evenement.getSource();
@@ -38,40 +25,191 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
 
         if (source instanceof Connexion) {
             cnx = (Connexion) source;
-            System.out.println("SERVEUR-Recu : " + evenement.getType() + " " + evenement.getArgument());
+
+            // --- Normaliser la commande en MAJUSCULES ---
             typeEvenement = evenement.getType();
-            switch (typeEvenement) {
-                case "EXIT": //Ferme la connexion avec le client qui a envoy� "EXIT":
+            String typeUC = (typeEvenement == null) ? "" : typeEvenement.trim().toUpperCase();
+            System.out.println("SERVEUR-Recu : " + typeUC + " " + evenement.getArgument());
+
+            switch (typeUC) {
+
+                case "EXIT": // Ferme la connexion avec le client qui a envoyé "EXIT"
                     cnx.envoyer("END");
                     serveur.enlever(cnx);
                     cnx.close();
                     break;
-                case "LIST": //Envoie la liste des alias des personnes connect�es :
-                    cnx.envoyer("LIST " + serveur.list());
-                    break;
-                case "MSG":
+
+                case "LIST": { // renvoyer tous sauf moi (affichés en MAJ)
                     aliasExpediteur = cnx.getAlias();
-                    msg = (evenement.getArgument());
-                    serveur.envoyerATousSauf(msg,aliasExpediteur);
+                    StringBuilder sb = new StringBuilder();
+                    String all = serveur.list(); // "a:b:c:"
+                    if (all != null && !all.isEmpty()) {
+                        for (String a : all.split(":")) {
+                            if (a == null || a.isEmpty()) continue;
+                            if (a.equalsIgnoreCase(aliasExpediteur)) continue; // exclure moi
+                            if (sb.length() > 0) sb.append(':');
+                            sb.append(a.toUpperCase()); // homogénéiser
+                        }
+                    }
+                    cnx.envoyer("LIST " + sb.toString());
                     break;
+                }
+
+                case "MSG": {
+                    // Ne pas uppercaser le contenu du message, seulement la commande
+                    aliasExpediteur = cnx.getAlias();
+                    msg = evenement.getArgument(); // message tel que saisi
+                    serveur.envoyerATousSauf(msg, aliasExpediteur);
+                    break;
+                }
+
                 case "HIST": {
-                    // Renvoyer l'historique au client qui le demande
-                    String hist = serveur.historique();         // "ligne1\nligne2\n..."
+                    String hist = serveur.historique(); // "ligne1\nligne2\n..."
                     if (!hist.isEmpty()) {
                         cnx.envoyer("HIST " + hist);
                     } else {
-                        // L’énoncé dit : s’il n’y a pas de messages, renvoyer OK
                         cnx.envoyer("OK");
                     }
-                    break; // IMPORTANT : ne pas tomber dans default
+                    break;
                 }
 
+                case "JOIN": {
+                    aliasExpediteur = cnx.getAlias();      // alias1 (canonique)
+                    String argRaw = evenement.getArgument();
+                    String alias2Saisi = (argRaw == null) ? "" : argRaw.trim();
+                    String alias2SaisiUC = alias2Saisi.toUpperCase();
+                    String moiUC = aliasExpediteur.toUpperCase();
 
-                //Ajoutez ici d�autres case pour g�rer d�autres commandes.
+                    // pas d'auto-invitation / alias vide
+                    if (alias2Saisi.isEmpty() || alias2Saisi.equalsIgnoreCase(aliasExpediteur)) {
+                        cnx.envoyer("DECLINE " + alias2SaisiUC);
+                        break;
+                    }
 
-                default: //Renvoyer le texte recu convertit en majuscules :
-                    msg = (evenement.getType() + " " + evenement.getArgument()).toUpperCase();
+                    // la cible doit exister (être connectée)
+                    Connexion cible = serveur.trouverParAlias(alias2Saisi);
+                    if (cible == null) {
+                        cnx.envoyer("USER N'EXISTE PAS");
+                        break; // on NE crée ni salon ni invitation
+                    }
+
+                    // alias canonique de la cible (affichage en MAJ)
+                    String alias2Canon = cible.getAlias();
+                    String alias2CanonUC = alias2Canon.toUpperCase();
+
+                    // invitation inverse déjà présente ? -> accepter automatiquement
+                    if (serveur.existeInvitation(alias2Canon, aliasExpediteur)) {
+                        serveur.supprimerInvitation(alias2Canon, aliasExpediteur);
+                        serveur.ajouterSalon(aliasExpediteur, alias2Canon); // ordre insensible
+                        cnx.envoyer("JOINOK " + alias2CanonUC);
+                        cible.envoyer("JOINOK " + moiUC);
+                        break;
+                    }
+
+                    // sinon, poser l'invitation (sans doublon) et notifier alias2
+                    if (!serveur.existeInvitation(aliasExpediteur, alias2Canon)) {
+                        serveur.ajouterInvitation(aliasExpediteur, alias2Canon);
+                    }
+                    cible.envoyer("JOIN " + moiUC); // notif d'invitation avec alias en MAJ
+                    break;
+                }
+
+                case "JOINOK": {
+                    // Autoriser JOINOK SEULEMENT si:
+                    // - l'alias ciblé existe (connecté)
+                    // - il y a une invitation aliasCible -> aliasExpediteur
+                    aliasExpediteur = cnx.getAlias();          // moi (qui accepte)
+                    String moiUC = aliasExpediteur.toUpperCase();
+
+                    String argRaw = evenement.getArgument();   // alias saisi
+                    String aliasCibleSaisi = (argRaw == null) ? "" : argRaw.trim();
+                    String aliasCibleSaisiUC = aliasCibleSaisi.toUpperCase();
+
+                    // invalide / auto / vide
+                    if (aliasCibleSaisi.isEmpty() || aliasCibleSaisi.equalsIgnoreCase(aliasExpediteur)) {
+                        cnx.envoyer("ERR JOINOK INVALIDE");
+                        break;
+                    }
+
+                    // Résoudre vers l'alias EXACT (canonique), mais on affichera en MAJ
+                    Connexion cible = serveur.trouverParAlias(aliasCibleSaisi);
+                    if (cible == null) {
+                        cnx.envoyer("USER N'EXISTE PAS");
+                        break;
+                    }
+                    String aliasCible = cible.getAlias();
+                    String aliasCibleUC = aliasCible.toUpperCase();
+
+                    // Vérifier l'invitation (aliasCible -> aliasExpediteur)
+                    if (!serveur.existeInvitation(aliasCible, aliasExpediteur)) {
+                        // Si c'est MOI qui ai invité l'autre, expliquer l'état
+                        if (serveur.existeInvitation(aliasExpediteur, aliasCible)) {
+                            cnx.envoyer("ERR TU AS INVITÉ " + aliasCibleUC + " — ATTENDS SON JOINOK");
+                        } else {
+                            cnx.envoyer("ERR PAS D'INVITATION DE " + aliasCibleUC);
+                        }
+                        break;
+                    }
+
+                    // OK : retirer l'invitation et créer le salon
+                    serveur.supprimerInvitation(aliasCible, aliasExpediteur);
+                    serveur.ajouterSalon(aliasExpediteur, aliasCible);
+
+                    // Notifier les deux (on envoie l'autre alias, en MAJ pour l'affichage)
+                    cnx.envoyer("JOINOK " + aliasCibleUC);
+                    cible.envoyer("JOINOK " + moiUC);
+                    break;
+                }
+
+                case "DECLINE": {
+                    aliasExpediteur = cnx.getAlias();          // alias1
+                    String moiUC = aliasExpediteur.toUpperCase();
+
+                    String argRaw = evenement.getArgument();   // "alias2"
+                    String alias2Saisi = (argRaw == null) ? "" : argRaw.trim();
+                    String alias2SaisiUC = alias2Saisi.toUpperCase();
+
+                    // garde-fous
+                    if (alias2Saisi.isEmpty() || alias2Saisi.equalsIgnoreCase(aliasExpediteur)) {
+                        cnx.envoyer("ERR DECLINE INVALIDE");
+                        break;
+                    }
+
+                    // 1) REFUSER une invitation REÇUE : (alias2 -> alias1)
+                    if (serveur.existeInvitation(alias2Saisi, aliasExpediteur)) {
+                        serveur.supprimerInvitation(alias2Saisi, aliasExpediteur);
+
+                        // informer alias2 si connecté
+                        Connexion cible = serveur.trouverParAlias(alias2Saisi);
+                        if (cible != null) {
+                            cible.envoyer("DECLINE " + moiUC);
+                        }
+                        break;
+                    }
+
+                    // 2) ANNULER une invitation ENVOYÉE : (alias1 -> alias2)
+                    if (serveur.existeInvitation(aliasExpediteur, alias2Saisi)) {
+                        serveur.supprimerInvitation(aliasExpediteur, alias2Saisi);
+
+                        Connexion cible = serveur.trouverParAlias(alias2Saisi);
+                        if (cible != null) {
+                            cible.envoyer("DECLINE " + moiUC);
+                        }
+                        break;
+                    }
+
+                    // 3) Aucune invitation trouvée
+                    cnx.envoyer("ERR AUCUNE INVITATION AVEC " + alias2SaisiUC);
+                    break;
+                }
+
+                default: {
+                    // Echo par défaut en MAJUSCULES
+                    String arg = (evenement.getArgument() == null) ? "" : evenement.getArgument();
+                    msg = (typeUC + " " + arg).toUpperCase();
                     cnx.envoyer(msg);
+                    break;
+                }
             }
         }
     }
