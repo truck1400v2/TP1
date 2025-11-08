@@ -33,11 +33,17 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
 
             switch (typeUC) {
 
-                case "EXIT": // Ferme la connexion avec le client qui a envoyé "EXIT"
+                case "EXIT": { // Ferme la connexion avec le client qui a envoyé "EXIT"
+                    aliasExpediteur = cnx.getAlias();          // alias qui quitte
+                    // Nettoyer invitations + salons et notifier les partenaires
+                    serveur.nettoyerDeconnexion(aliasExpediteur);
+                    cnx.envoyer("INFO bye :( "  + aliasExpediteur + "\n");
                     cnx.envoyer("END");
-                    serveur.enlever(cnx);
+                    serveur.enlever(cnx);                      // <-- enlève des connectés (LIST ne l’affichera plus)
                     cnx.close();
                     break;
+                }
+
 
                 case "LIST": { // renvoyer tous sauf moi (affichés en MAJ)
                     aliasExpediteur = cnx.getAlias();
@@ -68,21 +74,125 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     if (!hist.isEmpty()) {
                         cnx.envoyer("HIST " + hist);
                     } else {
-                        cnx.envoyer("OK");
+                        cnx.envoyer("Historique est vide...");
                     }
                     break;
                 }
 
-                case "JOIN": {
-                    aliasExpediteur = cnx.getAlias();      // alias1 (canonique)
-                    String argRaw = evenement.getArgument();
+                case "PRV": {
+                    // Format attendu: PRV alias2 message...
+                    aliasExpediteur = cnx.getAlias();           // alias1 (canonique côté serveur)
+                    String moiUC = aliasExpediteur.toUpperCase();
+
+                    String argRaw = evenement.getArgument();    // "alias2 message..."
+                    if (argRaw == null || argRaw.trim().isEmpty()) {
+                        cnx.envoyer("ERR PRV INVALIDE");
+                        break;
+                    }
+
+                    argRaw = argRaw.trim();
+                    int p = argRaw.indexOf(' ');
+                    String alias2Saisi, texte;
+                    if (p < 0) {
+                        // pas de message fourni
+                        alias2Saisi = argRaw;
+                        texte = "";
+                    } else {
+                        alias2Saisi = argRaw.substring(0, p).trim();
+                        texte       = argRaw.substring(p + 1).trim();
+                    }
+
+                    // gardes-fous
+                    if (alias2Saisi.isEmpty() || alias2Saisi.equalsIgnoreCase(aliasExpediteur)) {
+                        cnx.envoyer("ERR PRV INVALIDE");
+                        break;
+                    }
+                    if (texte.isEmpty()) {
+                        cnx.envoyer("ERR PRV MESSAGE VIDE");
+                        break;
+                    }
+
+                    // alias2 doit être connecté
+                    Connexion cible = serveur.trouverParAlias(alias2Saisi);
+                    if (cible == null) {
+                        cnx.envoyer("USER N'EXISTE PAS");
+                        break;
+                    }
+
+                    // vérifier l'existence du salon privé (ordre insensible)
+                    String alias2Canon   = cible.getAlias();
+                    String alias2CanonUC = alias2Canon.toUpperCase();
+                    if (!serveur.existeSalon(aliasExpediteur, alias2Canon)) {
+                        cnx.envoyer("ERR PAS DE SALON PRIVÉ AVEC " + alias2CanonUC);
+                        break;
+                    }
+
+                    // OK : envoyer le message privé
+                    // - écho côté émetteur: montre à qui on a parlé
+                    cnx.envoyer("PRV " + alias2CanonUC + " " + texte);
+                    // - message côté destinataire: montre qui parle
+                    cible.envoyer("PRV " + moiUC + " " + texte);
+                    break;
+                }
+
+                case "QUIT": {
+                    // Format: QUIT alias2  => quitter le salon privé avec alias2
+                    aliasExpediteur = cnx.getAlias();                // moi
+                    String moiUC = aliasExpediteur.toUpperCase();
+
+                    String argRaw = evenement.getArgument();         // "alias2"
                     String alias2Saisi = (argRaw == null) ? "" : argRaw.trim();
                     String alias2SaisiUC = alias2Saisi.toUpperCase();
-                    String moiUC = aliasExpediteur.toUpperCase();
+
+                    // gardes-fous
+                    if (alias2Saisi.isEmpty() || alias2Saisi.equalsIgnoreCase(aliasExpediteur)) {
+                        cnx.envoyer("ERR QUIT INVALIDE");
+                        break;
+                    }
+
+                    // si alias2 est connecté, récupérer son alias canonique ; sinon garder tel quel
+                    Connexion cible = serveur.trouverParAlias(alias2Saisi);
+                    String alias2Canon   = (cible != null) ? cible.getAlias() : alias2Saisi;
+                    String alias2CanonUC = alias2Canon.toUpperCase();
+
+                    // vérifier l'existence du salon privé (ordre insensible)
+                    if (!serveur.existeSalon(aliasExpediteur, alias2Canon)) {
+                        cnx.envoyer("ERR PAS DE SALON PRIVÉ AVEC " + alias2CanonUC);
+                        break;
+                    }
+
+                    // supprimer le salon privé
+                    serveur.supprimerSalon(aliasExpediteur, alias2Canon);
+
+                    // ✅ confirmer à l'émetteur
+                    cnx.envoyer("INFO Vous avez quitté la salle avec " + alias2CanonUC);
+
+                    // notifier l'autre participant s'il est connecté
+                    if (cible != null) {
+                        // Le client côté cible affichera: "<moi> a quitté le salon privé."
+                        cible.envoyer("QUIT " + moiUC);
+                    }
+                    break;
+                }
+
+                case "INV": {
+                    // aliasExpediteur veut la liste des invitations qu'il a reçues
+                    aliasExpediteur = cnx.getAlias();
+                    String liste = serveur.invitationsRecues(aliasExpediteur); // "A:B:C" ou "" si aucune
+                    cnx.envoyer("INV " + liste);
+                    break;
+                }
+
+
+
+                case "JOIN": {
+                    aliasExpediteur = cnx.getAlias();      // alias1 (canonique)
+                    msg = evenement.getArgument();         // "alias2" saisi
+                    String alias2Saisi = (msg == null ? "" : msg.trim());
 
                     // pas d'auto-invitation / alias vide
                     if (alias2Saisi.isEmpty() || alias2Saisi.equalsIgnoreCase(aliasExpediteur)) {
-                        cnx.envoyer("DECLINE " + alias2SaisiUC);
+                        cnx.envoyer("DECLINE " + alias2Saisi);
                         break;
                     }
 
@@ -93,11 +203,18 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                         break; // on NE crée ni salon ni invitation
                     }
 
-                    // alias canonique de la cible (affichage en MAJ)
-                    String alias2Canon = cible.getAlias();
+                    // alias canonique de la cible
+                    String alias2Canon   = cible.getAlias();
                     String alias2CanonUC = alias2Canon.toUpperCase();
+                    String moiUC         = aliasExpediteur.toUpperCase();
 
-                    // invitation inverse déjà présente ? -> accepter automatiquement
+                    // ✅ 0) Déjà en salon privé ensemble ? => ne rien recréer
+                    if (serveur.existeSalon(aliasExpediteur, alias2Canon)) {
+                        cnx.envoyer("INFO Vous êtes déjà en chat privé avec " + alias2CanonUC);
+                        break;
+                    }
+
+                    // 1) invitation inverse déjà présente ? -> accepter automatiquement
                     if (serveur.existeInvitation(alias2Canon, aliasExpediteur)) {
                         serveur.supprimerInvitation(alias2Canon, aliasExpediteur);
                         serveur.ajouterSalon(aliasExpediteur, alias2Canon); // ordre insensible
@@ -106,13 +223,17 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                         break;
                     }
 
-                    // sinon, poser l'invitation (sans doublon) et notifier alias2
+                    // 2) sinon, poser l'invitation (sans doublon) et notifier alias2
                     if (!serveur.existeInvitation(aliasExpediteur, alias2Canon)) {
                         serveur.ajouterInvitation(aliasExpediteur, alias2Canon);
                     }
-                    cible.envoyer("JOIN " + moiUC); // notif d'invitation avec alias en MAJ
+                    cible.envoyer("JOIN " + moiUC);
+
+                    // (facultatif) confirmation locale
+                    cnx.envoyer("INFO Invitation a été envoyée à " + alias2CanonUC);
                     break;
                 }
+
 
                 case "JOINOK": {
                     // Autoriser JOINOK SEULEMENT si:
@@ -124,6 +245,9 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     String argRaw = evenement.getArgument();   // alias saisi
                     String aliasCibleSaisi = (argRaw == null) ? "" : argRaw.trim();
                     String aliasCibleSaisiUC = aliasCibleSaisi.toUpperCase();
+
+
+
 
                     // invalide / auto / vide
                     if (aliasCibleSaisi.isEmpty() || aliasCibleSaisi.equalsIgnoreCase(aliasExpediteur)) {
@@ -175,6 +299,8 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                         break;
                     }
 
+
+
                     // 1) REFUSER une invitation REÇUE : (alias2 -> alias1)
                     if (serveur.existeInvitation(alias2Saisi, aliasExpediteur)) {
                         serveur.supprimerInvitation(alias2Saisi, aliasExpediteur);
@@ -210,6 +336,9 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     cnx.envoyer(msg);
                     break;
                 }
+
+
+
             }
         }
     }

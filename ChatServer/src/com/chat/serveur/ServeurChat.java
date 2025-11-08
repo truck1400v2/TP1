@@ -18,7 +18,12 @@ public class ServeurChat extends Serveur {
         if (!hist.isEmpty()) {
             connexion.envoyer("HIST " + hist);
         }
-        return super.ajouter(connexion);
+        boolean added = super.ajouter(connexion);
+
+        // 👋 Message d'accueil personnalisé
+        connexion.envoyer("Hello, " + connexion.getAlias());
+
+        return added;
     }
 
     @Override
@@ -173,4 +178,59 @@ public class ServeurChat extends Serveur {
     public synchronized boolean supprimerSalon(String a, String b) {
         return salons.remove(new SalonPrive(a, b));
     }
+
+    // Retourne "A:B:C" = liste des hôtes qui ont invité aliasInvite
+    public synchronized String invitationsRecues(String aliasInvite) {
+        if (aliasInvite == null) return "";
+        String target = aliasInvite.trim();
+        StringBuilder sb = new StringBuilder();
+        for (Invitation inv : invitations) {
+            if (inv.getInvite() != null && inv.getInvite().equalsIgnoreCase(target)) {
+                String hote = inv.getHote();
+                if (hote != null && !hote.isEmpty()) {
+                    if (sb.length() > 0) sb.append(':');
+                    sb.append(hote.toUpperCase()); // normalisation d'affichage
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    // Nettoie toutes les invitations et salons liés à 'alias' (et notifie les partenaires)
+    public synchronized void nettoyerDeconnexion(String alias) {
+        if (alias == null) return;
+
+        // --- Supprimer les invitations où alias est hôte ou invité ---
+        for (int i = 0; i < invitations.size(); i++) {
+            Invitation inv = invitations.get(i);
+            if (inv.getHote() != null && inv.getHote().equalsIgnoreCase(alias)
+                    || inv.getInvite() != null && inv.getInvite().equalsIgnoreCase(alias)) {
+                invitations.remove(i);
+                i--;
+            }
+        }
+
+        // --- Fermer les salons privés impliquant alias et prévenir l'autre partie ---
+        String aliasUC = alias.toUpperCase();
+        for (int i = 0; i < salons.size(); i++) {
+            SalonPrive sp = salons.get(i);
+            String a = sp.getHote();
+            String b = sp.getInvite();
+            if (a != null && b != null
+                    && (a.equalsIgnoreCase(alias) || b.equalsIgnoreCase(alias))) {
+                // Trouver l'autre participant
+                String autre = a.equalsIgnoreCase(alias) ? b : a;
+                Connexion cAutre = trouverParAlias(autre);
+                if (cAutre != null) {
+                    // Le client affiche déjà: "<arg> a quitté le salon privé."
+                    cAutre.envoyer("QUIT " + aliasUC);
+                }
+                salons.remove(i);
+                i--;
+            }
+        }
+    }
+
+
+
 }
