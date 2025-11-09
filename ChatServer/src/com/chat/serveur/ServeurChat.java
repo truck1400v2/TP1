@@ -20,7 +20,7 @@ public class ServeurChat extends Serveur {
         }
         boolean added = super.ajouter(connexion);
 
-        // 👋 Message d'accueil personnalisé
+        // Message d'accueil personnalisé
         connexion.envoyer("Hello, " + connexion.getAlias());
 
         return added;

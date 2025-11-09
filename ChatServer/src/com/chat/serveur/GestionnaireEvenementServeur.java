@@ -128,7 +128,6 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     }
 
                     // OK : envoyer le message privé
-                    // - écho côté émetteur: montre à qui on a parlé
                     cnx.envoyer("PRV " + alias2CanonUC + " " + texte);
                     // - message côté destinataire: montre qui parle
                     cible.envoyer("PRV " + moiUC + " " + texte);
@@ -164,7 +163,7 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     // supprimer le salon privé
                     serveur.supprimerSalon(aliasExpediteur, alias2Canon);
 
-                    // ✅ confirmer à l'émetteur
+                    // confirmer à l'émetteur
                     cnx.envoyer("INFO Vous avez quitté la salle avec " + alias2CanonUC);
 
                     // notifier l'autre participant s'il est connecté
@@ -208,7 +207,7 @@ public class GestionnaireEvenementServeur implements GestionnaireEvenement {
                     String alias2CanonUC = alias2Canon.toUpperCase();
                     String moiUC         = aliasExpediteur.toUpperCase();
 
-                    // ✅ 0) Déjà en salon privé ensemble ? => ne rien recréer
+                    // 0) Déjà en salon privé ensemble ? => ne rien recréer
                     if (serveur.existeSalon(aliasExpediteur, alias2Canon)) {
                         cnx.envoyer("INFO Vous êtes déjà en chat privé avec " + alias2CanonUC);
                         break;

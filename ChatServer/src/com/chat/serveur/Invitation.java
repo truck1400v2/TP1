@@ -26,7 +26,7 @@ public class Invitation {
     }
 
     @Override
-    public int hashCode() {
+    public int hashCode() { //Compare objts
         String h = (hote == null) ? "" : hote.toLowerCase();
         String i = (invite == null) ? "" : invite.toLowerCase();
         return (h + "\u0000" + i).hashCode();
